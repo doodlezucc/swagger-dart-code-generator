@@ -920,8 +920,9 @@ static $returnType $fromJsonFunction($valueType? value) => $enumNameCamelCase$fr
     bool useDefaultNullForLists,
     List<String> allEnumNames,
     List<String> allEnumListNames,
-    List<String> requiredProperties,
-  ) {
+    List<String> requiredProperties, [
+    List<String>? propertyDefinitions,
+  ]) {
     if (propertiesMap.isEmpty) {
       return '';
     }
@@ -947,8 +948,10 @@ static $returnType $fromJsonFunction($valueType? value) => $enumNameCamelCase$fr
 
       propertyNames.add(propertyName);
 
+      late String generated;
+
       if (propertyEntryMap.containsKey('type')) {
-        results.add(generatePropertyContentByType(
+        generated = generatePropertyContentByType(
           propertyEntryMap,
           propertyName,
           propertyKey,
@@ -959,21 +962,19 @@ static $returnType $fromJsonFunction($valueType? value) => $enumNameCamelCase$fr
           allEnumListNames,
           basicTypesMap,
           requiredProperties,
-        ));
+        );
       } else if (propertyEntryMap['allOf'] != null) {
-        results.add(
-          generatePropertyContentByAllOf(
-            propertyEntryMap: propertyEntryMap,
-            allEnumListNames: allEnumListNames,
-            className: className,
-            allEnumNames: allEnumNames,
-            propertyKey: propertyKey,
-            propertyName: propertyName,
-            requiredProperties: requiredProperties,
-          ),
+        generated = generatePropertyContentByAllOf(
+          propertyEntryMap: propertyEntryMap,
+          allEnumListNames: allEnumListNames,
+          className: className,
+          allEnumNames: allEnumNames,
+          propertyKey: propertyKey,
+          propertyName: propertyName,
+          requiredProperties: requiredProperties,
         );
       } else if (propertyEntryMap['\$ref'] != null) {
-        results.add(generatePropertyContentByRef(
+        generated = generatePropertyContentByRef(
           propertyEntryMap,
           propertyName,
           propertyKey,
@@ -982,9 +983,9 @@ static $returnType $fromJsonFunction($valueType? value) => $enumNameCamelCase$fr
           allEnumListNames,
           basicTypesMap,
           requiredProperties,
-        ));
+        );
       } else if (propertyEntryMap['schema'] != null) {
-        results.add(generatePropertyContentBySchema(
+        generated = generatePropertyContentBySchema(
           propertyEntryMap,
           propertyName,
           propertyKey,
@@ -993,15 +994,29 @@ static $returnType $fromJsonFunction($valueType? value) => $enumNameCamelCase$fr
           allEnumListNames,
           basicTypesMap,
           requiredProperties,
-        ));
+        );
       } else {
-        results.add(generatePropertyContentByDefault(
+        generated = generatePropertyContentByDefault(
           propertyEntryMap,
           propertyName,
           allEnumNames,
           allEnumListNames,
-        ));
+        );
       }
+
+      propertyDefinitions?.add(generated);
+
+      final whitespace = '\n\t/// ';
+      var description = propertyEntryMap['description'] as String?;
+
+      if (description != null && generated.isNotEmpty) {
+        description = description.trim();
+        final docComment =
+            description.split('\n').map((line) => '$whitespace$line').join();
+        generated = '$docComment\n$generated';
+      }
+
+      results.add(generated);
     }
 
     return results.join('\n');
@@ -1210,6 +1225,7 @@ List<enums.$neededName> ${neededName.camelCase}ListFromJson(
       requiredProperties: requiredProperties,
     );
 
+    final propertyDefinitions = <String>[];
     final generatedProperties = generatePropertiesContent(
       rootMap,
       properties,
@@ -1220,19 +1236,20 @@ List<enums.$neededName> ${neededName.camelCase}ListFromJson(
       allEnumNames,
       allEnumListNames,
       requiredProperties,
+      propertyDefinitions,
     );
 
     final validatedClassName =
         '${getValidatedClassName(className)}${options.modelPostfix}';
 
     final copyWithMethod =
-        generateCopyWithContent(generatedProperties, validatedClassName);
+        generateCopyWithContent(propertyDefinitions, validatedClassName);
 
     final getHashContent =
-        generateGetHashContent(generatedProperties, validatedClassName);
+        generateGetHashContent(propertyDefinitions, validatedClassName);
 
     final equalsOverride =
-        generateEqualsOverride(generatedProperties, validatedClassName);
+        generateEqualsOverride(propertyDefinitions, validatedClassName);
 
     final generatedClass = '''
 @JsonSerializable(explicitToJson: true)
@@ -1258,10 +1275,10 @@ $copyWithMethod
   }
 
   String generateEqualsOverride(
-      String generatedProperties, String validatedClassName) {
+      List<String> generatedProperties, String validatedClassName) {
     final splittedProperties = RegExp(
       'final .+ (.+);',
-    ).allMatches(generatedProperties).map((e) => e.group(1)!);
+    ).allMatches(generatedProperties.join('\n')).map((e) => e.group(1)!);
 
     if (splittedProperties.isEmpty) {
       return '';
@@ -1283,10 +1300,10 @@ $copyWithMethod
   }
 
   String generateCopyWithContent(
-      String generatedProperties, String validatedClassName) {
+      List<String> generatedProperties, String validatedClassName) {
     final splittedProperties = RegExp(
       'final (.+) (.+);',
-    ).allMatches(generatedProperties).map((e) {
+    ).allMatches(generatedProperties.join('\n')).map((e) {
       var type = e.group(1)!;
       if (!type.endsWith('?') && type != kDynamic) {
         type += '?';
@@ -1309,11 +1326,11 @@ $copyWithMethod
   }
 
   String generateGetHashContent(
-      String generatedProperties, String validatedClassName) {
+      List<String> generatedProperties, String validatedClassName) {
     final propertiesHash = RegExp(
       'final .+ (.+);',
     )
-        .allMatches(generatedProperties)
+        .allMatches(generatedProperties.join('\n'))
         .map((e) => e.group(1)!)
         .map((e) => 'const DeepCollectionEquality().hash($e)');
 
